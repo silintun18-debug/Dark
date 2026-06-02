@@ -10,13 +10,12 @@ app = Flask(__name__)
 BOT_TOKEN = "8778201970:AAHz1Ulh8uJM55Aim6USu_EBWNWLvLE4-0c"
 ADMIN_CHAT_ID = "7632580640"
 
-user_sessions = {}   # Keeps track of {device_id: {"ip": ip, "last_seen": timestamp}}
-logout_queue = []    # Queue for relay.py to fetch and disconnect
-active_users = set()  # Keeps track of currently online device IDs
+user_sessions = {}   # {device_id: {"ip": ip, "last_seen": timestamp}}
+logout_queue = []    # Queue for admin3.py to fetch and disconnect
+active_users = set()  # Currently online device IDs
 
 def get_current_mm_time():
-    """Returns current Myanmar Time (GMT +6:30) as a formatted string"""
-    # Render servers usually use UTC time, so we add 6 hours and 30 minutes
+    """Returns current Myanmar Time (GMT +6:30)"""
     mm_time = datetime.utcnow() + timedelta(hours=6, minutes=30)
     return mm_time.strftime("%d-%m-%Y %I:%M:%S %p")
 
@@ -31,29 +30,32 @@ def send_telegram_alert(message):
 
 @app.route('/heartbeat', methods=['POST'])
 def heartbeat():
-    data = request.json
+    data = request.json or {}
     device_id = data.get("device_id")
-    device_ip = data.get("ip")
     
+    # 💡 အဓိကပြင်ဆင်ချက်- Client က ပို့တဲ့ IP ကို ယူမယ်၊ မရရင် ချိတ်ဆက်လာတဲ့ Network IP ကို တိုက်ရိုက်ဖမ်းယူမယ်
+    device_ip = data.get("ip")
+    if not device_ip or device_ip == "Unknown" or device_ip.startswith("127."):
+        device_ip = request.remote_addr
+
     if device_id and device_ip:
         current_time = time.time()
-        
-        # If this user was not active before, send ONLINE alert
+
         if device_id not in active_users:
             active_users.add(device_id)
             time_str = get_current_mm_time()
-            send_telegram_alert(f"🔔 Voucher Client [{device_id}] is now ONLINE on Termux!\n⏰ Time: {time_str}")
-            
+            send_telegram_alert(f"🔔 Voucher Client [{device_id}] is now ONLINE!\n📍 Registered IP: {device_ip}\n⏰ Time: {time_str}")
+
         user_sessions[device_id] = {"ip": device_ip, "last_seen": current_time}
-        return jsonify({"status": "alive"}), 200
-        
+        return jsonify({"status": "alive", "registered_ip": device_ip}), 200
+
     return jsonify({"error": "bad data"}), 400
 
 @app.route('/check_logout', methods=['GET'])
 def check_logout():
     global logout_queue
     commands = list(logout_queue)
-    logout_queue.clear()
+    logout_queue.clear()  # Clear queue after fetching
     return jsonify({"logout_ips": commands}), 200
 
 def monitor_users():
@@ -61,24 +63,24 @@ def monitor_users():
     while True:
         current_time = time.time()
         to_delete = []
-        
+
         for dev_id, info in list(user_sessions.items()):
             # If heartbeat is missing for more than 35 seconds
             if current_time - info["last_seen"] > 35:
-                if info["ip"] not in logout_queue:
-                    logout_queue.append(info["ip"])
+                target_ip = info["ip"]
+                if target_ip and target_ip not in logout_queue:
+                    logout_queue.append(target_ip)
                 to_delete.append(dev_id)
-                
-                # Send OFFLINE alert with exact time when disconnected
+
                 if dev_id in active_users:
                     active_users.remove(dev_id)
                     time_str = get_current_mm_time()
-                    send_telegram_alert(f"❌ Voucher Client [{dev_id}] is now OFFLINE (Termux Closed)!\n⏰ Closed At: {time_str}")
-        
+                    send_telegram_alert(f"❌ Voucher Client [{dev_id}] is now OFFLINE (Termux Closed)!\n📍 Disconnecting IP: {target_ip}\n⏰ Closed At: {time_str}")
+
         for dev_id in to_delete:
             if dev_id in user_sessions:
                 del user_sessions[dev_id]
-                
+
         time.sleep(5)
 
 # Start background monitoring thread
