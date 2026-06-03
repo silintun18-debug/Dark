@@ -11,7 +11,7 @@ BOT_TOKEN = "8778201970:AAHz1Ulh8uJM55Aim6USu_EBWNWLvLE4-0c"
 ADMIN_CHAT_ID = "7632580640"
 
 user_sessions = {}   # {device_id: {"ip": ip, "last_seen": timestamp}}
-logout_queue = []    # Queue for admin3.py to fetch and disconnect
+logout_queue = []    # Queue for admin12.py to fetch and disconnect
 active_users = set()  # Currently online device IDs
 
 def get_current_mm_time():
@@ -32,8 +32,7 @@ def send_telegram_alert(message):
 def heartbeat():
     data = request.json or {}
     device_id = data.get("device_id")
-    
-    # 💡 အဓိကပြင်ဆင်ချက်- Client က ပို့တဲ့ IP ကို ယူမယ်၊ မရရင် ချိတ်ဆက်လာတဲ့ Network IP ကို တိုက်ရိုက်ဖမ်းယူမယ်
+
     device_ip = data.get("ip")
     if not device_ip or device_ip == "Unknown" or device_ip.startswith("127."):
         device_ip = request.remote_addr
@@ -57,6 +56,16 @@ def check_logout():
     commands = list(logout_queue)
     logout_queue.clear()  # Clear queue after fetching
     return jsonify({"logout_ips": commands}), 200
+
+@app.route('/active_clients', methods=['GET'])
+def active_clients():
+    clients_list = []
+    for dev_id, info in user_sessions.items():
+        clients_list.append({
+            "device_id": dev_id,
+            "ip": info["ip"]
+        })
+    return jsonify({"clients": clients_list}), 200
 
 def monitor_users():
     """Background thread that monitors user presence every 5 seconds"""
