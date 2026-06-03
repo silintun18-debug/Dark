@@ -6,21 +6,18 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# Configuration
 BOT_TOKEN = "8778201970:AAHz1Ulh8uJM55Aim6USu_EBWNWLvLE4-0c"
 ADMIN_CHAT_ID = "7632580640"
 
-user_sessions = {}   # {device_id: {"ip": ip, "last_seen": timestamp}}
-logout_queue = []    # Queue for admin12.py to fetch and disconnect
-active_users = set()  # Currently online device IDs
+user_sessions = {}   
+logout_queue = []    
+active_users = set()  
 
 def get_current_mm_time():
-    """Returns current Myanmar Time (GMT +6:30)"""
     mm_time = datetime.utcnow() + timedelta(hours=6, minutes=30)
     return mm_time.strftime("%d-%m-%Y %I:%M:%S %p")
 
 def send_telegram_alert(message):
-    """Sends notification text to Telegram Bot"""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {"chat_id": ADMIN_CHAT_ID, "text": message}
     try:
@@ -54,7 +51,7 @@ def heartbeat():
 def check_logout():
     global logout_queue
     commands = list(logout_queue)
-    logout_queue.clear()  # Clear queue after fetching
+    logout_queue.clear()  
     return jsonify({"logout_ips": commands}), 200
 
 @app.route('/active_clients', methods=['GET'])
@@ -67,14 +64,26 @@ def active_clients():
         })
     return jsonify({"clients": clients_list}), 200
 
+@app.route('/remove_client', methods=['POST'])
+def remove_client():
+    data = request.json or {}
+    target_ip = data.get("ip")
+    if target_ip:
+        to_remove = [dev_id for dev_id, info in user_sessions.items() if info["ip"] == target_ip]
+        for dev_id in to_remove:
+            if dev_id in user_sessions:
+                del user_sessions[dev_id]
+            if dev_id in active_users:
+                active_users.remove(dev_id)
+        return jsonify({"success": True}), 200
+    return jsonify({"error": "Missing IP"}), 400
+
 def monitor_users():
-    """Background thread that monitors user presence every 5 seconds"""
     while True:
         current_time = time.time()
         to_delete = []
 
         for dev_id, info in list(user_sessions.items()):
-            # If heartbeat is missing for more than 35 seconds
             if current_time - info["last_seen"] > 35:
                 target_ip = info["ip"]
                 if target_ip and target_ip not in logout_queue:
@@ -92,7 +101,6 @@ def monitor_users():
 
         time.sleep(5)
 
-# Start background monitoring thread
 threading.Thread(target=monitor_users, daemon=True).start()
 
 if __name__ == '__main__':
